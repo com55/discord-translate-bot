@@ -9,11 +9,15 @@ vi.mock("discord-interactions", async (importOriginal) => {
 import { verifyKey } from "discord-interactions";
 import worker, { type Env } from "../src/index";
 import {
-  translate,
+  translateAuto,
+  translateTo,
   translateReply,
   resolveLlmConfig,
+  resolveLangConfig,
   type LlmConfig,
 } from "../src/translate";
+
+const langs = { primary: "Thai", secondary: "English" };
 
 const env: Env = {
   DISCORD_PUBLIC_KEY: "pub",
@@ -197,9 +201,9 @@ describe("translate()", () => {
     );
   }
 
-  it("uses the auto (→Thai/English) instruction for target 'auto'", async () => {
+  it("translateAuto builds a primary/secondary detect instruction", async () => {
     const m = mockOpenRouter();
-    const out = await translate("hello", "auto", cfg);
+    const out = await translateAuto("hello", langs, cfg);
     expect(out).toBe("out");
     const [url, init] = m.mock.calls[0];
     expect(String(url)).toBe("https://llm.example/v1/chat/completions");
@@ -210,9 +214,17 @@ describe("translate()", () => {
     expect(sent.messages[1].content).toBe("hello");
   });
 
-  it("uses an explicit target instruction otherwise", async () => {
+  it("translateAuto honors a custom language pair", async () => {
     const m = mockOpenRouter();
-    await translate("สวัสดี", "English", cfg);
+    await translateAuto("hola", { primary: "Spanish", secondary: "English" }, cfg);
+    const sent = JSON.parse((m.mock.calls[0][1] as RequestInit).body as string);
+    expect(sent.messages[0].content).toContain("source language is Spanish");
+    expect(sent.messages[0].content).toContain("into Spanish");
+  });
+
+  it("translateTo uses an explicit target instruction", async () => {
+    const m = mockOpenRouter();
+    await translateTo("สวัสดี", "English", cfg);
     const sent = JSON.parse((m.mock.calls[0][1] as RequestInit).body as string);
     expect(sent.messages[0].content).toContain("into English");
     expect(sent.messages[0].content).not.toContain("detect the source language");
@@ -222,7 +234,14 @@ describe("translate()", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("nope", { status: 500 }),
     );
-    await expect(translate("x", "auto", cfg)).rejects.toThrow("LLM 500");
+    await expect(translateAuto("x", langs, cfg)).rejects.toThrow("LLM 500");
+  });
+
+  it("resolveLangConfig defaults to Thai/English and honors overrides", () => {
+    expect(resolveLangConfig({})).toEqual({ primary: "Thai", secondary: "English" });
+    expect(
+      resolveLangConfig({ PRIMARY_LANG: "Spanish", SECONDARY_LANG: "French" }),
+    ).toEqual({ primary: "Spanish", secondary: "French" });
   });
 
   it("translateReply embeds context and honors an explicit language", async () => {

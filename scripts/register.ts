@@ -31,18 +31,14 @@ const commands = [
   {
     name: "translate",
     type: 1, // CHAT_INPUT slash
-    description: "Translate text (default target: English)",
+    description: "Translate text into a target language",
     options: [
       { name: "text", description: "Text to translate", type: 3, required: true },
       {
         name: "target",
-        description: "Target language (default English)",
+        description: "Target language, e.g. English, Spanish (blank = default)",
         type: 3,
         required: false,
-        choices: [
-          { name: "English", value: "English" },
-          { name: "Thai", value: "Thai" },
-        ],
       },
     ],
     integration_types: [1],

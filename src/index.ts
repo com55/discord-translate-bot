@@ -4,7 +4,13 @@ import {
   InteractionResponseFlags,
   verifyKey,
 } from "discord-interactions";
-import { translate, translateReply, resolveLlmConfig } from "./translate";
+import {
+  translateAuto,
+  translateTo,
+  translateReply,
+  resolveLlmConfig,
+  resolveLangConfig,
+} from "./translate";
 
 export interface Env {
   DISCORD_PUBLIC_KEY: string;
@@ -13,6 +19,9 @@ export interface Env {
   // Optional provider config (defaults: OpenRouter + claude-haiku-4.5).
   LLM_BASE_URL?: string;
   LLM_MODEL?: string;
+  // Optional language pair (defaults: Thai / English).
+  PRIMARY_LANG?: string;
+  SECONDARY_LANG?: string;
 }
 
 // Application command types (Discord)
@@ -77,12 +86,13 @@ export default {
         return deferTranslate(ctx, interaction, env, text, "auto", true);
       }
 
-      // Slash "/translate" → explicit target, default English. No reply button.
+      // Slash "/translate" → explicit target, default secondary language. No button.
       if (data.type === CMD_CHAT_INPUT) {
         const options: { name: string; value: string }[] = data.options ?? [];
         const opt = (name: string) => options.find((o) => o.name === name)?.value;
         const text = String(opt("text") ?? "").slice(0, MAX_INPUT);
-        const target = String(opt("target") ?? "English");
+        const target =
+          String(opt("target") ?? "").trim() || resolveLangConfig(env).secondary;
         return deferTranslate(ctx, interaction, env, text, target, false);
       }
     }
@@ -128,7 +138,11 @@ function deferTranslate(
     if (!text.trim()) return { content: NO_TEXT };
     let translated: string;
     try {
-      translated = await translate(text, target, resolveLlmConfig(env));
+      const cfg = resolveLlmConfig(env);
+      translated =
+        target === "auto"
+          ? await translateAuto(text, resolveLangConfig(env), cfg)
+          : await translateTo(text, target, cfg);
     } catch (err) {
       console.error("translate failed", err);
       return { content: FAILED };
@@ -179,7 +193,7 @@ function replyButtonRow() {
   return {
     type: C_ACTION_ROW,
     components: [
-      { type: C_BUTTON, style: 2, label: "✍️ แปลตอบกลับ", custom_id: REPLY_BUTTON },
+      { type: C_BUTTON, style: 2, label: "✍️ Translate a reply", custom_id: REPLY_BUTTON },
     ],
   };
 }
@@ -190,41 +204,41 @@ function buildReplyModal(original: string, translation: string) {
     type: InteractionResponseType.MODAL,
     data: {
       custom_id: REPLY_MODAL,
-      title: "แปลคำตอบ",
+      title: "Translate a reply",
       components: [
         {
           type: C_TEXT_DISPLAY,
-          content: `**${translation || "(แปลคำตอบของคุณ)"}**`,
+          content: `**${translation || "(your reply will be translated)"}**`,
         },
         {
           type: C_LABEL,
-          label: "คำตอบของคุณ",
+          label: "Your reply",
           component: {
             type: C_TEXT_INPUT,
             custom_id: "reply",
             style: 2,
             required: true,
             max_length: 2000,
-            placeholder: "พิมพ์คำตอบเป็นภาษาไทย แล้วบอทจะแปลให้",
+            placeholder: "Type your reply; the bot will translate it.",
           },
         },
         {
           type: C_LABEL,
-          label: "ภาษาปลายทาง",
-          description: "เว้นว่าง = ภาษาเดียวกับข้อความต้นฉบับ",
+          label: "Target language",
+          description: "Blank = the same language as the original message",
           component: {
             type: C_TEXT_INPUT,
             custom_id: "lang",
             style: 1,
             required: false,
             max_length: 30,
-            placeholder: "เช่น จีน / อังกฤษ / ญี่ปุ่น",
+            placeholder: "e.g. English, Chinese, Spanish",
           },
         },
         {
           type: C_LABEL,
-          label: "ข้อความต้นฉบับ (context)",
-          description: "AI ใช้เป็นบริบท — แก้หรือลบได้",
+          label: "Original message (context)",
+          description: "Used as context for the AI — edit or clear if needed",
           component: {
             type: C_TEXT_INPUT,
             custom_id: "ctx",

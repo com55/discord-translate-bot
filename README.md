@@ -1,48 +1,54 @@
 # discord-translate-bot
 
-A personal, serverless Discord bot that translates messages. Runs as a single
-Cloudflare Worker. Installed to **your Discord account** (user-install), so it works
-**everywhere** — any server, group DM, or DM.
+A personal, serverless Discord translation bot. Runs as a single Cloudflare Worker and
+installs to **your Discord account** (user-install), so it works **everywhere** — any
+server, group DM, or DM, even where the bot isn't a member. All replies are
+**ephemeral** (only you see them).
 
-Two entry points, both reply **ephemerally** (only you see the result):
+- **Right-click a message → Apps → Translate** — auto-detects the source and translates
+  it into your primary language. (If the message is already in the primary language, it
+  flips to the secondary one.) The result has a **✍️ Translate a reply** button.
+- **✍️ Translate a reply** (button on the result) — opens a modal where you type a reply;
+  the bot translates it *using the original message as context*, so the wording fits the
+  conversation. Defaults to the original message's language, or pick any target.
+- **`/translate text:<draft> [target:<language>]`** — translate your own draft before
+  sending. `target` is any language; blank uses the secondary language.
 
-- **Right-click a message → Apps → Translate** — translates any source language
-  (English, Japanese, Chinese, …) to **Thai**. If the message is already Thai, it
-  translates to English.
-- **`/translate text:<draft> [target:English|Thai]`** — translate a draft before you
-  send it. Default target is **English**.
-
-Translation is done by `anthropic/claude-haiku-4.5` via OpenRouter by default, but
-the provider is **configurable** — any OpenAI-compatible endpoint works (see below).
+Both the **language pair** and the **LLM provider** are configurable (see below). Default:
+Thai ⇄ English, translated by `anthropic/claude-haiku-4.5` via OpenRouter.
 
 ## Architecture
 
 ```
 Discord ──POST /interactions──► Worker (src/index.ts)
-  verify ed25519 → PING→PONG / route command
+  verify ed25519 → route (command / button / modal)
   → respond NOW: deferred ephemeral ack (beats Discord's 3s deadline)
-  → ctx.waitUntil: translate() → PATCH .../messages/@original  (edit the reply in)
+  → ctx.waitUntil: translate → PATCH .../messages/@original  (edit the reply in)
 ```
 
-- `src/index.ts` — verify, route, defer, follow-up.
-- `src/translate.ts` — the OpenRouter call.
+- `src/index.ts` — verify, route, defer, follow-up; the reply button + modal.
+- `src/translate.ts` — the LLM calls (auto / explicit target / context-aware reply).
 - `scripts/register.ts` — one-time command registration (user-installable).
+
+No database: the original message is carried statelessly through the result text
+(`> -# subtext`) and a context field in the reply modal.
 
 ## Prerequisites
 
-- A Discord application (https://discord.com/developers/applications). From it you need:
-  - **Public Key** (General Information) → `DISCORD_PUBLIC_KEY`
-  - **Application ID** → `DISCORD_APP_ID`
-  - **Bot token** (Bot tab) → `DISCORD_BOT_TOKEN` (used only to register commands)
-- An API key for your LLM provider → `LLM_API_KEY` (default provider: OpenRouter,
-  https://openrouter.ai/keys)
+- A Discord application — https://discord.com/developers/applications. You'll need its
+  **Public Key** and **Application ID** (General Information) and a **Bot token** (Bot tab,
+  used only to register commands). Under **Installation**, make sure **User Install** is
+  enabled.
+- An API key for an **OpenAI-compatible** LLM provider (default: OpenRouter —
+  https://openrouter.ai/keys).
 - A Cloudflare account (`npx wrangler login`).
 
 ## Setup
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars   # fill in all four values
+cp .dev.vars.example .dev.vars   # fill in DISCORD_PUBLIC_KEY, DISCORD_APP_ID,
+                                 # LLM_API_KEY, DISCORD_BOT_TOKEN
 ```
 
 ### 1. Register the commands (one-time, and after any command change)
@@ -51,8 +57,7 @@ cp .dev.vars.example .dev.vars   # fill in all four values
 npm run register
 ```
 
-This prints an **install URL**. Open it and authorize — that adds the app to your
-account so the commands follow you everywhere.
+Prints an **install URL** — open it and authorize to add the app to your account.
 
 ### 2. Deploy the Worker
 
@@ -68,15 +73,25 @@ npx wrangler deploy
 
 ### 3. Point Discord at the Worker
 
-In the Discord Developer Portal → your app → **General Information** →
-**Interactions Endpoint URL**, set it to the Worker URL and save. Discord sends a
-PING; the Worker answers PONG and the URL is accepted.
+Discord Developer Portal → your app → **General Information** → **Interactions Endpoint
+URL** → paste the Worker URL and save. Discord sends a PING; the Worker answers PONG and
+the URL is accepted.
 
-## Choosing a provider
+## Configuration
 
-Translation calls any **OpenAI-compatible** `/chat/completions` endpoint. Set the
-base URL and model in `wrangler.jsonc` under `vars` (non-secret), and the key as the
-`LLM_API_KEY` secret:
+Non-secret settings live in `wrangler.jsonc` under `vars`; the API key is a secret. Edit
+`vars` then redeploy (`npx wrangler deploy`); override locally in `.dev.vars`.
+
+| Var | Default | Meaning |
+|-----|---------|---------|
+| `PRIMARY_LANG` | `Thai` | Context-menu translates any source into this language |
+| `SECONDARY_LANG` | `English` | A primary-language message flips to this; also the `/translate` default target |
+| `LLM_BASE_URL` | `https://openrouter.ai/api/v1` | OpenAI-compatible `/chat/completions` base |
+| `LLM_MODEL` | `anthropic/claude-haiku-4.5` | Model id |
+| `LLM_API_KEY` (secret) | — | Provider API key |
+
+Use full English language names (e.g. `Spanish`, `Japanese`). Any OpenAI-compatible
+provider works by swapping the base URL + model:
 
 | Provider | `LLM_BASE_URL` | example `LLM_MODEL` |
 |----------|----------------|---------------------|
@@ -85,32 +100,18 @@ base URL and model in `wrangler.jsonc` under `vars` (non-secret), and the key as
 | Groq | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` |
 | Local Ollama | `http://localhost:11434/v1` | `qwen2.5` |
 
-After editing `vars`, redeploy (`npx wrangler deploy`). Locally, override in `.dev.vars`.
-
-## Use
-
-- Right-click any message → **Apps → Translate** → ephemeral Thai (or English) reply.
-- `/translate text:<your draft>` → ephemeral English; add `target:Thai` to flip.
-
-### Translate a reply with context
-
-The **Translate** result has a **✍️ แปลคำตอบ** button. Click it → a modal opens showing
-the original + its Thai translation, with fields for your reply draft and an optional
-target language. The bot translates your reply *using the original message as context*,
-so the wording fits the conversation. Leave the language blank to reply in the same
-language as the original (auto-detected). Result is ephemeral — copy and send it.
-
-Statelessly, the original message is carried through the message text (`-# subtext`)
-and a context field in the modal — there is no database.
-
 ## Develop / test
 
 ```bash
-npm test          # vitest unit tests (routing, defer, translate prompts)
+npm test          # vitest unit tests (routing, defer, reply flow, prompts)
 npm run typecheck # tsc on the Worker + tests
 npm run dev       # local wrangler dev (needs .dev.vars)
 ```
 
-> Local interaction testing needs a public tunnel (e.g. `cloudflared tunnel`) pointed
-> at `wrangler dev`, since Discord must reach the endpoint. Easiest path is to deploy
-> and test against the live Worker.
+> Local interaction testing needs a public tunnel (e.g. `cloudflared tunnel`) pointed at
+> `wrangler dev`, since Discord must reach the endpoint. Deploying and testing against the
+> live Worker is usually easier.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

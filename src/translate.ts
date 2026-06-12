@@ -23,6 +23,22 @@ export function resolveLlmConfig(env: {
   };
 }
 
+export interface LangConfig {
+  primary: string; // main target, e.g. "Thai"
+  secondary: string; // what a primary-language message flips to, e.g. "English"
+}
+
+/** Resolve the language pair from env (defaults: Thai / English). */
+export function resolveLangConfig(env: {
+  PRIMARY_LANG?: string;
+  SECONDARY_LANG?: string;
+}): LangConfig {
+  return {
+    primary: env.PRIMARY_LANG || "Thai",
+    secondary: env.SECONDARY_LANG || "English",
+  };
+}
+
 /** One chat-completions round trip. Returns the assistant text. Throws on error. */
 async function chat(cfg: LlmConfig, system: string, user: string): Promise<string> {
   const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
@@ -57,19 +73,31 @@ async function chat(cfg: LlmConfig, system: string, user: string): Promise<strin
 }
 
 /**
- * Translate `text`.
- * - `target === "auto"`: detect source; if Thai → English, otherwise → Thai.
- * - explicit target (e.g. "English", "Thai"): translate into that language.
+ * Auto-direction translate: detect the source; if it is `langs.primary`,
+ * translate into `langs.secondary`; otherwise translate into `langs.primary`.
  */
-export async function translate(
+export async function translateAuto(
+  text: string,
+  langs: LangConfig,
+  cfg: LlmConfig,
+): Promise<string> {
+  const system =
+    `You are a translation engine. First detect the source language of the message ` +
+    `(it may be any language). If the source language is ${langs.primary}, translate it ` +
+    `into ${langs.secondary}; otherwise translate it into ${langs.primary}. ` +
+    `Reply with only the translation — no preamble, quotes, romanization, or notes.`;
+  return chat(cfg, system, text);
+}
+
+/** Translate `text` into an explicit `target` language. */
+export async function translateTo(
   text: string,
   target: string,
   cfg: LlmConfig,
 ): Promise<string> {
   const system =
-    target === "auto"
-      ? "You are a translation engine. First detect the source language of the message (it may be English, Chinese, Japanese, or any language). If the source language is Thai, translate it into English; otherwise translate it into Thai. Reply with only the translation — no preamble, quotes, romanization, or notes."
-      : `Translate the following message into ${target}. Reply with only the translation — no preamble, quotes, romanization, or notes.`;
+    `Translate the following message into ${target}. ` +
+    `Reply with only the translation — no preamble, quotes, romanization, or notes.`;
   return chat(cfg, system, text);
 }
 
