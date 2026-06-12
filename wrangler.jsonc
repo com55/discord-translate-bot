@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "discord-translate-bot",
   "main": "src/index.ts",
-  "compatibility_date": "2026-06-13",
+  "compatibility_date": "2026-06-12",
   "compatibility_flags": ["nodejs_compat"],
   // Non-secret provider config. Swap to any OpenAI-compatible endpoint here
   // (OpenAI, Groq, Together, local Ollama, ...). The API key is a secret:
