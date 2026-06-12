@@ -38,8 +38,8 @@ export async function translate(
 ): Promise<string> {
   const instruction =
     target === "auto"
-      ? "Translate the following message to Thai. If it is already written in Thai, translate it to English instead. Output only the translation, with no preamble, quotes, or explanation."
-      : `Translate the following message to ${target}. Output only the translation, with no preamble, quotes, or explanation.`;
+      ? "You are a translation engine. First detect the source language of the message (it may be English, Chinese, Japanese, or any language). If the source language is Thai, translate it into English; otherwise translate it into Thai. Reply with only the translation — no preamble, quotes, romanization, or notes."
+      : `Translate the following message into ${target}. Reply with only the translation — no preamble, quotes, romanization, or notes.`;
 
   const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
     method: "POST",
@@ -54,7 +54,7 @@ export async function translate(
         { role: "system", content: instruction },
         { role: "user", content: text },
       ],
-      temperature: 0.2,
+      temperature: 0,
     }),
   });
 

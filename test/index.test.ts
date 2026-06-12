@@ -113,8 +113,8 @@ describe("translate()", () => {
     expect(String(url)).toBe("https://llm.example/v1/chat/completions");
     const sent = JSON.parse((init as RequestInit).body as string);
     expect(sent.model).toBe("test-model");
-    expect(sent.messages[0].content).toContain("to Thai");
-    expect(sent.messages[0].content).toContain("already written in Thai");
+    expect(sent.messages[0].content).toContain("into Thai");
+    expect(sent.messages[0].content).toContain("source language is Thai");
     expect(sent.messages[1].content).toBe("hello");
   });
 
@@ -122,8 +122,8 @@ describe("translate()", () => {
     const m = mockOpenRouter();
     await translate("สวัสดี", "English", cfg);
     const sent = JSON.parse((m.mock.calls[0][1] as RequestInit).body as string);
-    expect(sent.messages[0].content).toContain("to English");
-    expect(sent.messages[0].content).not.toContain("already written in Thai");
+    expect(sent.messages[0].content).toContain("into English");
+    expect(sent.messages[0].content).not.toContain("detect the source language");
   });
 
   it("throws on a non-OK response", async () => {
