@@ -180,7 +180,7 @@ describe("interaction routing", () => {
     await settle();
     const llm = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(llm.messages[0].content).toContain("你好"); // context embedded
-    expect(llm.messages[0].content).toContain("the language of the CONTEXT message");
+    expect(llm.messages[0].content).toContain("Detect the CONTEXT language precisely");
     expect(llm.messages[1].content).toBe("สวัสดีครับ");
     const patch = JSON.parse(
       (fetchMock.mock.calls.at(-1)![1] as RequestInit).body as string,

@@ -119,10 +119,18 @@ export async function translateReply(
 ): Promise<string> {
   const target = lang.trim()
     ? `"${lang.trim()}"`
-    : "the language of the CONTEXT message (detect it)";
+    : "the same language as the CONTEXT message below";
+  // When auto-detecting, pin the output to the context's exact language + script,
+  // so e.g. a Russian (Cyrillic) message never gets answered in Chinese.
+  const detectRule = lang.trim()
+    ? ""
+    : " Detect the CONTEXT language precisely and reply in that exact language and " +
+      "writing system — e.g. Russian→Russian (Cyrillic), Chinese→Chinese, " +
+      "Japanese→Japanese, Korean→Korean, Arabic→Arabic; never switch to a different language.";
   const system =
     `You help a user reply in a chat. Translate the USER reply into ${target}.\n` +
     `CONTEXT (the message being replied to; do not translate it, use it only to detect language and tone):\n"""\n${context}\n"""\n` +
+    `${detectRule}` +
     `Respond with ONLY a JSON object: {"target":"<target language name>","text":"<the user reply written in the target language>"}. No other text.`;
   return extractReplyText(await chat(cfg, system, reply));
 }
