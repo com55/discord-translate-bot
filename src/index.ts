@@ -136,7 +136,7 @@ function deferTranslate(
     if (withReplyButton) {
       const original = text.replace(/\s+/g, " ").trim().slice(0, 1500);
       return {
-        content: `-# ${original}\n**${translated}**`,
+        content: `> -# ${original}\n**${translated}**`,
         components: [replyButtonRow()],
       };
     }
@@ -179,7 +179,7 @@ function replyButtonRow() {
   return {
     type: C_ACTION_ROW,
     components: [
-      { type: C_BUTTON, style: 2, label: "✍️ แปลคำตอบ", custom_id: REPLY_BUTTON },
+      { type: C_BUTTON, style: 2, label: "✍️ แปลตอบกลับ", custom_id: REPLY_BUTTON },
     ],
   };
 }
@@ -194,7 +194,7 @@ function buildReplyModal(original: string, translation: string) {
       components: [
         {
           type: C_TEXT_DISPLAY,
-          content: `-# ${original || "(ไม่มีข้อความต้นฉบับ)"}\n**${translation}**`,
+          content: `**${translation || "(แปลคำตอบของคุณ)"}**`,
         },
         {
           type: C_LABEL,
@@ -242,7 +242,7 @@ function buildReplyModal(original: string, translation: string) {
 /** Parse the original (subtext line) and translation (bold line) out of a result. */
 function parseReplyMessage(content: string): { original: string; translation: string } {
   const lines = content.split("\n");
-  const original = lines[0]?.startsWith("-# ") ? lines[0].slice(3).trim() : "";
+  const original = lines[0]?.match(/^>?\s*-#\s+(.*)$/)?.[1].trim() ?? "";
   const translation = lines
     .slice(1)
     .join("\n")

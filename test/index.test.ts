@@ -122,7 +122,7 @@ describe("interaction routing", () => {
     const patch = fetchMock.mock.calls.at(-1)!; // last call = followup PATCH
     expect(String(patch[0])).toContain("/messages/@original");
     const sent = JSON.parse((patch[1] as RequestInit).body as string);
-    expect(sent.content).toBe("-# 你好\n**สวัสดี**");
+    expect(sent.content).toBe("> -# 你好\n**สวัสดี**");
     expect(sent.components[0].components[0].custom_id).toBe("open_reply");
   });
 
@@ -132,7 +132,7 @@ describe("interaction routing", () => {
       post({
         type: 3, // MESSAGE_COMPONENT
         data: { custom_id: "open_reply" },
-        message: { content: "-# 你好\n**สวัสดี**" },
+        message: { content: "> -# 你好\n**สวัสดี**" },
       }),
       env,
       ctx,
@@ -143,10 +143,10 @@ describe("interaction routing", () => {
     const ctxInput = out.data.components.find(
       (c: any) => c.component?.custom_id === "ctx",
     );
-    expect(ctxInput.component.value).toBe("你好");
+    expect(ctxInput.component.value).toBe("你好"); // original carried into context field
     const td = out.data.components.find((c: any) => c.type === 10);
-    expect(td.content).toContain("你好");
-    expect(td.content).toContain("สวัสดี");
+    expect(td.content).toContain("สวัสดี"); // shows the translation
+    expect(td.content).not.toContain("你好"); // not the original (it's in the ctx field)
   });
 
   it("translates a reply from the modal submit using context + blank language", async () => {
