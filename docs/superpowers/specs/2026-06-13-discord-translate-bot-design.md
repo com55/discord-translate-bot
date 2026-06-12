@@ -10,8 +10,10 @@ A single-user, serverless Discord bot that translates messages between Thai and
 English. Two entry points:
 
 1. **Message context menu "Translate"** — right-click any message → Apps →
-   Translate. Auto-detects direction (Thai → English, otherwise → Thai). Reply is
-   ephemeral (only the invoker sees it).
+   Translate. Primary target is **Thai**: the LLM auto-detects the source language
+   (English, Japanese, Chinese, etc.) and translates it to Thai. If the message is
+   already Thai, it translates to English instead (so the command never no-ops).
+   Reply is ephemeral (only the invoker sees it).
 2. **`/translate` slash command** — translate a draft *before* sending it. Takes
    the text plus an optional target language (choices: English, Thai; **default
    English**). Reply is ephemeral, so the user copies it and sends it themselves.
