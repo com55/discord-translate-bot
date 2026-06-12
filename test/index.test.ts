@@ -126,7 +126,7 @@ describe("interaction routing", () => {
     const patch = fetchMock.mock.calls.at(-1)!; // last call = followup PATCH
     expect(String(patch[0])).toContain("/messages/@original");
     const sent = JSON.parse((patch[1] as RequestInit).body as string);
-    expect(sent.content).toBe("> -# 你好\n**สวัสดี**");
+    expect(sent.content).toBe("> -# 你好\nสวัสดี");
     expect(sent.components[0].components[0].custom_id).toBe("open_reply");
   });
 
@@ -136,7 +136,7 @@ describe("interaction routing", () => {
       post({
         type: 3, // MESSAGE_COMPONENT
         data: { custom_id: "open_reply" },
-        message: { content: "> -# 你好\n**สวัสดี**" },
+        message: { content: "> -# 你好\nสวัสดี" },
       }),
       env,
       ctx,

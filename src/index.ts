@@ -150,7 +150,7 @@ function deferTranslate(
     if (withReplyButton) {
       const original = text.replace(/\s+/g, " ").trim().slice(0, 1500);
       return {
-        content: `> -# ${original}\n**${translated}**`,
+        content: `> -# ${original}\n${translated}`,
         components: [replyButtonRow()],
       };
     }
