@@ -8,7 +8,12 @@ vi.mock("discord-interactions", async (importOriginal) => {
 
 import { verifyKey } from "discord-interactions";
 import worker, { type Env } from "../src/index";
-import { translate, resolveLlmConfig, type LlmConfig } from "../src/translate";
+import {
+  translate,
+  translateReply,
+  resolveLlmConfig,
+  type LlmConfig,
+} from "../src/translate";
 
 const env: Env = {
   DISCORD_PUBLIC_KEY: "pub",
@@ -91,6 +96,93 @@ describe("interaction routing", () => {
       "No text to translate",
     );
   });
+
+  it("attaches the original + reply button on a context-menu translation", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: "สวัสดี" } }] }), {
+        status: 200,
+      }),
+    );
+    const { ctx, settle } = makeCtx();
+    const res = await worker.fetch(
+      post({
+        type: 2,
+        token: "tok",
+        data: {
+          type: 3,
+          target_id: "m1",
+          resolved: { messages: { m1: { content: "你好" } } },
+        },
+      }),
+      env,
+      ctx,
+    );
+    expect(await res.json()).toEqual({ type: 5, data: { flags: 64 } });
+    await settle();
+    const patch = fetchMock.mock.calls.at(-1)!; // last call = followup PATCH
+    expect(String(patch[0])).toContain("/messages/@original");
+    const sent = JSON.parse((patch[1] as RequestInit).body as string);
+    expect(sent.content).toBe("-# 你好\n**สวัสดี**");
+    expect(sent.components[0].components[0].custom_id).toBe("open_reply");
+  });
+
+  it("opens the reply modal from the button, parsing the original", async () => {
+    const { ctx } = makeCtx();
+    const res = await worker.fetch(
+      post({
+        type: 3, // MESSAGE_COMPONENT
+        data: { custom_id: "open_reply" },
+        message: { content: "-# 你好\n**สวัสดี**" },
+      }),
+      env,
+      ctx,
+    );
+    const out = (await res.json()) as any;
+    expect(out.type).toBe(9); // MODAL
+    expect(out.data.custom_id).toBe("replymodal");
+    const ctxInput = out.data.components.find(
+      (c: any) => c.component?.custom_id === "ctx",
+    );
+    expect(ctxInput.component.value).toBe("你好");
+    const td = out.data.components.find((c: any) => c.type === 10);
+    expect(td.content).toContain("你好");
+    expect(td.content).toContain("สวัสดี");
+  });
+
+  it("translates a reply from the modal submit using context + blank language", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: "你好呀" } }] }), {
+        status: 200,
+      }),
+    );
+    const { ctx, settle } = makeCtx();
+    const res = await worker.fetch(
+      post({
+        type: 5, // MODAL_SUBMIT
+        token: "tok",
+        data: {
+          custom_id: "replymodal",
+          components: [
+            { type: 18, component: { type: 4, custom_id: "reply", value: "สวัสดีครับ" } },
+            { type: 18, component: { type: 4, custom_id: "lang", value: "" } },
+            { type: 18, component: { type: 4, custom_id: "ctx", value: "你好" } },
+          ],
+        },
+      }),
+      env,
+      ctx,
+    );
+    expect(await res.json()).toEqual({ type: 5, data: { flags: 64 } });
+    await settle();
+    const llm = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(llm.messages[0].content).toContain("你好"); // context embedded
+    expect(llm.messages[0].content).toContain("the language of the CONTEXT message");
+    expect(llm.messages[1].content).toBe("สวัสดีครับ");
+    const patch = JSON.parse(
+      (fetchMock.mock.calls.at(-1)![1] as RequestInit).body as string,
+    );
+    expect(patch.content).toBe("你好呀"); // non-JSON mock falls back to raw text
+  });
 });
 
 describe("translate()", () => {
@@ -131,6 +223,33 @@ describe("translate()", () => {
       new Response("nope", { status: 500 }),
     );
     await expect(translate("x", "auto", cfg)).rejects.toThrow("LLM 500");
+  });
+
+  it("translateReply embeds context and honors an explicit language", async () => {
+    const m = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: "x" } }] }), {
+        status: 200,
+      }),
+    );
+    await translateReply("ตอบกลับ", "你好", "Chinese", cfg);
+    const sent = JSON.parse((m.mock.calls[0][1] as RequestInit).body as string);
+    expect(sent.messages[0].content).toContain('"Chinese"');
+    expect(sent.messages[0].content).toContain("你好");
+    expect(sent.messages[1].content).toBe("ตอบกลับ");
+  });
+
+  it("translateReply extracts .text from fenced JSON output", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            { message: { content: '```json\n{"target":"Chinese","text":"你好呀"}\n```' } },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    expect(await translateReply("ตอบ", "你好", "", cfg)).toBe("你好呀");
   });
 });
 

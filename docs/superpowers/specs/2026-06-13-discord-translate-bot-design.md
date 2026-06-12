@@ -18,6 +18,15 @@ English. Two entry points:
    the text plus an optional target language (choices: English, Thai; **default
    English**). Reply is ephemeral, so the user copies it and sends it themselves.
 
+3. **Translate-a-reply flow** (no new command) — the context-menu result carries a
+   **✍️ แปลคำตอบ** button. Clicking it opens a **modal** (Components V2: a Text
+   Display showing the original + translation, plus Label-wrapped Text Inputs for the
+   reply draft, an optional target language, and the original as carried context).
+   On submit, the bot translates the reply using the original as context. Target
+   language defaults to the original message's language (auto-detected). Stateless:
+   the original is carried via the result `-# subtext` line and the modal context
+   field — no database. Uses a JSON `{target,text}` contract for reliable detection.
+
 Installed to the user's Discord **account** (user-install), so both commands work
 **everywhere** — any server, group DM, or DM, including servers where the bot is
 not a member.

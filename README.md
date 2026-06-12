@@ -92,6 +92,17 @@ After editing `vars`, redeploy (`npx wrangler deploy`). Locally, override in `.d
 - Right-click any message → **Apps → Translate** → ephemeral Thai (or English) reply.
 - `/translate text:<your draft>` → ephemeral English; add `target:Thai` to flip.
 
+### Translate a reply with context
+
+The **Translate** result has a **✍️ แปลคำตอบ** button. Click it → a modal opens showing
+the original + its Thai translation, with fields for your reply draft and an optional
+target language. The bot translates your reply *using the original message as context*,
+so the wording fits the conversation. Leave the language blank to reply in the same
+language as the original (auto-detected). Result is ephemeral — copy and send it.
+
+Statelessly, the original message is carried through the message text (`-# subtext`)
+and a context field in the modal — there is no database.
+
 ## Develop / test
 
 ```bash
