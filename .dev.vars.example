@@ -1,8 +1,13 @@
 # Copy to .dev.vars and fill in. .dev.vars is gitignored.
-# Used by the Worker (set in prod via `wrangler secret put <NAME>`):
+# Secrets used by the Worker (set in prod via `wrangler secret put <NAME>`):
 DISCORD_PUBLIC_KEY=
 DISCORD_APP_ID=
-OPENROUTER_API_KEY=
+LLM_API_KEY=
+
+# Provider config — defaults live in wrangler.jsonc [vars]. Uncomment to override
+# locally / point at another OpenAI-compatible provider:
+# LLM_BASE_URL=https://openrouter.ai/api/v1
+# LLM_MODEL=anthropic/claude-haiku-4.5
 
 # Used only by scripts/register.ts (command registration), not by the Worker:
 DISCORD_BOT_TOKEN=

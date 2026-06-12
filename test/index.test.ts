@@ -8,12 +8,18 @@ vi.mock("discord-interactions", async (importOriginal) => {
 
 import { verifyKey } from "discord-interactions";
 import worker, { type Env } from "../src/index";
-import { translate } from "../src/translate";
+import { translate, resolveLlmConfig, type LlmConfig } from "../src/translate";
 
 const env: Env = {
   DISCORD_PUBLIC_KEY: "pub",
   DISCORD_APP_ID: "app123",
-  OPENROUTER_API_KEY: "key",
+  LLM_API_KEY: "key",
+};
+
+const cfg: LlmConfig = {
+  baseUrl: "https://llm.example/v1",
+  model: "test-model",
+  apiKey: "key",
 };
 
 function makeCtx() {
@@ -101,9 +107,12 @@ describe("translate()", () => {
 
   it("uses the auto (→Thai/English) instruction for target 'auto'", async () => {
     const m = mockOpenRouter();
-    const out = await translate("hello", "auto", "key");
+    const out = await translate("hello", "auto", cfg);
     expect(out).toBe("out");
-    const sent = JSON.parse((m.mock.calls[0][1] as RequestInit).body as string);
+    const [url, init] = m.mock.calls[0];
+    expect(String(url)).toBe("https://llm.example/v1/chat/completions");
+    const sent = JSON.parse((init as RequestInit).body as string);
+    expect(sent.model).toBe("test-model");
     expect(sent.messages[0].content).toContain("to Thai");
     expect(sent.messages[0].content).toContain("already written in Thai");
     expect(sent.messages[1].content).toBe("hello");
@@ -111,7 +120,7 @@ describe("translate()", () => {
 
   it("uses an explicit target instruction otherwise", async () => {
     const m = mockOpenRouter();
-    await translate("สวัสดี", "English", "key");
+    await translate("สวัสดี", "English", cfg);
     const sent = JSON.parse((m.mock.calls[0][1] as RequestInit).body as string);
     expect(sent.messages[0].content).toContain("to English");
     expect(sent.messages[0].content).not.toContain("already written in Thai");
@@ -121,6 +130,30 @@ describe("translate()", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("nope", { status: 500 }),
     );
-    await expect(translate("x", "auto", "key")).rejects.toThrow("OpenRouter 500");
+    await expect(translate("x", "auto", cfg)).rejects.toThrow("LLM 500");
+  });
+});
+
+describe("resolveLlmConfig()", () => {
+  it("defaults to OpenRouter + claude-haiku-4.5", () => {
+    expect(resolveLlmConfig({ LLM_API_KEY: "k" })).toEqual({
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "anthropic/claude-haiku-4.5",
+      apiKey: "k",
+    });
+  });
+
+  it("honors overrides and strips a trailing slash from the base URL", () => {
+    expect(
+      resolveLlmConfig({
+        LLM_API_KEY: "k",
+        LLM_BASE_URL: "https://api.groq.com/openai/v1/",
+        LLM_MODEL: "llama-3.3-70b",
+      }),
+    ).toEqual({
+      baseUrl: "https://api.groq.com/openai/v1",
+      model: "llama-3.3-70b",
+      apiKey: "k",
+    });
   });
 });

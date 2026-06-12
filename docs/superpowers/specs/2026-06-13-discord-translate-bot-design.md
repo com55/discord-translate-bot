@@ -42,8 +42,11 @@ optimization.
 
 ### Translation engine
 
-OpenRouter `/chat/completions`, model `anthropic/claude-haiku-4.5` (OpenAI-compatible
-API — no Anthropic SDK involved). Single secret: `OPENROUTER_API_KEY`.
+Any **OpenAI-compatible** `/chat/completions` endpoint. Provider is configurable via
+env: `LLM_BASE_URL` + `LLM_MODEL` (non-secret `vars`, default OpenRouter +
+`anthropic/claude-haiku-4.5`) and `LLM_API_KEY` (secret). Swapping to OpenAI, Groq,
+Together, a local Ollama, etc. is config-only — no code change. No Anthropic SDK
+involved. `resolveLlmConfig(env)` applies the defaults.
 
 ### Request flow
 
@@ -69,13 +72,13 @@ The followup uses the interaction token + application id — no bot auth header 
 
 - **`src/index.ts`** (~120 LOC) — verify → route → defer → followup. Handles PING,
   both command types, and error/edge-case followups.
-- **`src/translate.ts`** — `translate(text, target)`:
+- **`src/translate.ts`** — `resolveLlmConfig(env)` + `translate(text, target, cfg)`:
   - `target === "auto"` → prompt: *"Translate the following message to Thai. If it
     is already Thai, translate it to English instead. Output only the translation,
     no preamble."*
   - explicit target (`"English"` / `"Thai"`) → prompt: *"Translate the following
     message to {target}. Output only the translation, no preamble."*
-  - Calls OpenRouter, returns the translated string.
+  - Calls the configured OpenAI-compatible endpoint, returns the translated string.
 - **`scripts/register.ts`** — one-time registration of two global commands with
   `integration_types: [1]` (user-install) and `contexts: [0, 1, 2]`
   (guild / bot-DM / private channel). Prints the install URL. Uses `DISCORD_BOT_TOKEN`.
@@ -88,7 +91,9 @@ The followup uses the interaction token + application id — no bot auth header 
 | `DISCORD_PUBLIC_KEY` | Worker | ed25519 request verification |
 | `DISCORD_APP_ID` | Worker, register | application id for followup webhook + registration |
 | `DISCORD_BOT_TOKEN` | register script only | authorize command registration |
-| `OPENROUTER_API_KEY` | Worker | OpenRouter chat completions |
+| `LLM_API_KEY` | Worker | provider API key (secret) |
+| `LLM_BASE_URL` | Worker | OpenAI-compatible base URL (`var`, default OpenRouter) |
+| `LLM_MODEL` | Worker | model id (`var`, default `anthropic/claude-haiku-4.5`) |
 
 ## Command definitions
 

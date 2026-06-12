@@ -4,12 +4,15 @@ import {
   InteractionResponseFlags,
   verifyKey,
 } from "discord-interactions";
-import { translate } from "./translate";
+import { translate, resolveLlmConfig } from "./translate";
 
 export interface Env {
   DISCORD_PUBLIC_KEY: string;
   DISCORD_APP_ID: string;
-  OPENROUTER_API_KEY: string;
+  LLM_API_KEY: string;
+  // Optional provider config (defaults: OpenRouter + claude-haiku-4.5).
+  LLM_BASE_URL?: string;
+  LLM_MODEL?: string;
 }
 
 // Application command types (Discord)
@@ -86,7 +89,7 @@ function deferAndFollowUp(
   const produce = async (): Promise<string> => {
     if (!text.trim()) return NO_TEXT;
     try {
-      return await translate(text, target, env.OPENROUTER_API_KEY);
+      return await translate(text, target, resolveLlmConfig(env));
     } catch (err) {
       console.error("translate failed", err);
       return FAILED;

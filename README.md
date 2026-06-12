@@ -12,7 +12,8 @@ Two entry points, both reply **ephemerally** (only you see the result):
 - **`/translate text:<draft> [target:English|Thai]`** — translate a draft before you
   send it. Default target is **English**.
 
-Translation is done by `anthropic/claude-haiku-4.5` via OpenRouter.
+Translation is done by `anthropic/claude-haiku-4.5` via OpenRouter by default, but
+the provider is **configurable** — any OpenAI-compatible endpoint works (see below).
 
 ## Architecture
 
@@ -33,7 +34,8 @@ Discord ──POST /interactions──► Worker (src/index.ts)
   - **Public Key** (General Information) → `DISCORD_PUBLIC_KEY`
   - **Application ID** → `DISCORD_APP_ID`
   - **Bot token** (Bot tab) → `DISCORD_BOT_TOKEN` (used only to register commands)
-- An OpenRouter API key (https://openrouter.ai/keys) → `OPENROUTER_API_KEY`
+- An API key for your LLM provider → `LLM_API_KEY` (default provider: OpenRouter,
+  https://openrouter.ai/keys)
 - A Cloudflare account (`npx wrangler login`).
 
 ## Setup
@@ -58,7 +60,7 @@ account so the commands follow you everywhere.
 npx wrangler login        # once
 npx wrangler secret put DISCORD_PUBLIC_KEY
 npx wrangler secret put DISCORD_APP_ID
-npx wrangler secret put OPENROUTER_API_KEY
+npx wrangler secret put LLM_API_KEY
 npx wrangler deploy
 ```
 
@@ -69,6 +71,21 @@ npx wrangler deploy
 In the Discord Developer Portal → your app → **General Information** →
 **Interactions Endpoint URL**, set it to the Worker URL and save. Discord sends a
 PING; the Worker answers PONG and the URL is accepted.
+
+## Choosing a provider
+
+Translation calls any **OpenAI-compatible** `/chat/completions` endpoint. Set the
+base URL and model in `wrangler.jsonc` under `vars` (non-secret), and the key as the
+`LLM_API_KEY` secret:
+
+| Provider | `LLM_BASE_URL` | example `LLM_MODEL` |
+|----------|----------------|---------------------|
+| OpenRouter (default) | `https://openrouter.ai/api/v1` | `anthropic/claude-haiku-4.5` |
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
+| Groq | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` |
+| Local Ollama | `http://localhost:11434/v1` | `qwen2.5` |
+
+After editing `vars`, redeploy (`npx wrangler deploy`). Locally, override in `.dev.vars`.
 
 ## Use
 
