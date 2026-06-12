@@ -1,0 +1,8 @@
+# Copy to .dev.vars and fill in. .dev.vars is gitignored.
+# Used by the Worker (set in prod via `wrangler secret put <NAME>`):
+DISCORD_PUBLIC_KEY=
+DISCORD_APP_ID=
+OPENROUTER_API_KEY=
+
+# Used only by scripts/register.ts (command registration), not by the Worker:
+DISCORD_BOT_TOKEN=
