@@ -92,8 +92,9 @@ export default {
     if (interaction.type === InteractionType.APPLICATION_COMMAND) {
       const data = interaction.data;
 
-      // Message context menu "Translate" → auto (any source → Thai, Thai → English).
-      // Result carries the original + a "translate a reply" button.
+      // Message context menu "Translate" → auto-direction (translateAuto). The
+      // result is translation-only; the original is stashed in KV behind the
+      // "translate a reply" button (see deferTranslate).
       if (data.type === CMD_MESSAGE) {
         const message = data.resolved?.messages?.[data.target_id];
         const text = (message?.content ?? "").slice(0, MAX_INPUT);
