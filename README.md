@@ -30,8 +30,11 @@ Discord ──POST /interactions──► Worker (src/index.ts)
 - `src/translate.ts` — the LLM calls (auto / explicit target / context-aware reply).
 - `scripts/register.ts` — one-time command registration (user-installable).
 
-No database: the original message is carried statelessly through the result text
-(`> -# subtext`) and a context field in the reply modal.
+The result message is **translation-only**. The original message (needed as
+context if you press *Translate a reply*) is kept in **Workers KV** under a random
+key embedded in the button, not stuffed into the message text — so it never eats
+into Discord's 2000-character limit. A translation that still exceeds 2000
+characters is delivered as a `translation.txt` attachment.
 
 ## Prerequisites
 
@@ -59,7 +62,19 @@ npm run register
 
 Prints an **install URL** — open it and authorize to add the app to your account.
 
-### 2. Deploy the Worker
+### 2. Create the KV namespace
+
+The reply button stores the original message in Workers KV. Create the namespace
+and paste the printed `id` into `wrangler.jsonc` under `kv_namespaces`:
+
+```bash
+npx wrangler kv namespace create REPLY_CTX
+# → copy the id into wrangler.jsonc (replace REPLACE_WITH_KV_NAMESPACE_ID)
+```
+
+`wrangler dev` simulates KV locally, so no extra setup is needed for local runs.
+
+### 3. Deploy the Worker
 
 ```bash
 npx wrangler login        # once
@@ -71,7 +86,7 @@ npx wrangler deploy
 
 `wrangler deploy` prints the Worker URL, e.g. `https://discord-translate-bot.<acct>.workers.dev`.
 
-### 3. Point Discord at the Worker
+### 4. Point Discord at the Worker
 
 Discord Developer Portal → your app → **General Information** → **Interactions Endpoint
 URL** → paste the Worker URL and save. Discord sends a PING; the Worker answers PONG and

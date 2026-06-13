@@ -15,6 +15,12 @@
     "PRIMARY_LANG": "Thai",
     "SECONDARY_LANG": "English"
   },
+  // Stores the original message behind a "translate a reply" button so the
+  // result message itself stays translation-only. Create with
+  // `wrangler kv namespace create REPLY_CTX` and paste the printed id here.
+  "kv_namespaces": [
+    { "binding": "REPLY_CTX", "id": "de6fec3120474db8968bae978097741f" }
+  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1

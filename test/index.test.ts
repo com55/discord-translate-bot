@@ -19,10 +19,28 @@ import {
 
 const langs = { primary: "Thai", secondary: "English" };
 
+/** In-memory stand-in for a KV namespace, with the backing store exposed. */
+function makeKV() {
+  const store = new Map<string, string>();
+  const kv = {
+    put: async (k: string, v: string) => void store.set(k, v),
+    get: async (k: string, opts?: { type?: string }) => {
+      const v = store.get(k);
+      if (v == null) return null;
+      return opts?.type === "json" ? JSON.parse(v) : v;
+    },
+    delete: async (k: string) => void store.delete(k),
+  } as unknown as KVNamespace;
+  return { kv, store };
+}
+
+let replyKV: ReturnType<typeof makeKV>;
+
 const env: Env = {
   DISCORD_PUBLIC_KEY: "pub",
   DISCORD_APP_ID: "app123",
   LLM_API_KEY: "key",
+  REPLY_CTX: undefined as unknown as KVNamespace,
 };
 
 const cfg: LlmConfig = {
@@ -56,6 +74,8 @@ describe("interaction routing", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.mocked(verifyKey).mockResolvedValue(true);
+    replyKV = makeKV();
+    env.REPLY_CTX = replyKV.kv;
   });
 
   it("responds PONG to a PING", async () => {
@@ -101,7 +121,7 @@ describe("interaction routing", () => {
     );
   });
 
-  it("attaches the original + reply button on a context-menu translation", async () => {
+  it("stashes the original in KV; the result is translation-only + a keyed button", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ choices: [{ message: { content: "สวัสดี" } }] }), {
         status: 200,
@@ -126,17 +146,24 @@ describe("interaction routing", () => {
     const patch = fetchMock.mock.calls.at(-1)!; // last call = followup PATCH
     expect(String(patch[0])).toContain("/messages/@original");
     const sent = JSON.parse((patch[1] as RequestInit).body as string);
-    expect(sent.content).toBe("> -# 你好\nสวัสดี");
-    expect(sent.components[0].components[0].custom_id).toBe("open_reply");
+    expect(sent.content).toBe("สวัสดี"); // translation only — no quoted original
+    const customId: string = sent.components[0].components[0].custom_id;
+    expect(customId).toMatch(/^open_reply:/);
+    // The original is in KV under the button's key, not in the message.
+    const key = customId.slice("open_reply:".length);
+    expect(JSON.parse(replyKV.store.get(key)!)).toEqual({
+      original: "你好",
+      translation: "สวัสดี",
+    });
   });
 
-  it("opens the reply modal from the button, parsing the original", async () => {
+  it("opens the reply modal from the button, loading the original from KV", async () => {
+    await replyKV.kv.put("k1", JSON.stringify({ original: "你好", translation: "สวัสดี" }));
     const { ctx } = makeCtx();
     const res = await worker.fetch(
       post({
         type: 3, // MESSAGE_COMPONENT
-        data: { custom_id: "open_reply" },
-        message: { content: "> -# 你好\nสวัสดี" },
+        data: { custom_id: "open_reply:k1" },
       }),
       env,
       ctx,
@@ -147,10 +174,70 @@ describe("interaction routing", () => {
     const ctxInput = out.data.components.find(
       (c: any) => c.component?.custom_id === "ctx",
     );
-    expect(ctxInput.component.value).toBe("你好"); // original carried into context field
+    expect(ctxInput.component.value).toBe("你好"); // original loaded from KV
     const td = out.data.components.find((c: any) => c.type === 10);
     expect(td.content).toContain("สวัสดี"); // shows the translation
     expect(td.content).not.toContain("你好"); // not the original (it's in the ctx field)
+  });
+
+  it("still opens the reply modal (empty context) when the KV key is gone", async () => {
+    const { ctx } = makeCtx();
+    const res = await worker.fetch(
+      post({ type: 3, data: { custom_id: "open_reply:expired" } }),
+      env,
+      ctx,
+    );
+    const out = (await res.json()) as any;
+    expect(out.type).toBe(9);
+    const ctxInput = out.data.components.find(
+      (c: any) => c.component?.custom_id === "ctx",
+    );
+    expect(ctxInput.component.value).toBe(""); // no context, but still usable
+  });
+
+  it("delivers an over-length translation as a .txt attachment", async () => {
+    const long = "ก".repeat(4500);
+    const discordCalls: { url: string; init: RequestInit }[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: any, init: any) => {
+        const url = String(input);
+        if (url.includes("/chat/completions")) {
+          return new Response(
+            JSON.stringify({ choices: [{ message: { content: long } }] }),
+            { status: 200 },
+          );
+        }
+        discordCalls.push({ url, init });
+        // First (inline JSON) attempt is rejected for length; the file retry passes.
+        return typeof init.body === "string"
+          ? new Response(JSON.stringify({ code: 50035 }), { status: 400 })
+          : new Response("{}", { status: 200 });
+      },
+    );
+    const { ctx, settle } = makeCtx();
+    await worker.fetch(
+      post({
+        type: 2,
+        token: "tok",
+        data: {
+          type: 1, // slash command → no button, just the translation
+          options: [{ name: "text", value: "x" }, { name: "target", value: "Thai" }],
+        },
+      }),
+      env,
+      ctx,
+    );
+    await settle();
+    expect(discordCalls).toHaveLength(2);
+    // 1) inline JSON PATCH, rejected; 2) multipart PATCH carrying the file.
+    expect(typeof discordCalls[0].init.body).toBe("string");
+    expect(discordCalls[0].init.method).toBe("PATCH");
+    const form = discordCalls[1].init.body as FormData;
+    expect(form).toBeInstanceOf(FormData);
+    const file = form.get("files[0]") as unknown as Blob;
+    expect(await file.text()).toBe(long); // nothing lost
+    const payload = JSON.parse(form.get("payload_json") as string);
+    expect(payload.attachments[0].filename).toBe("translation.txt");
   });
 
   it("translates a reply from the modal submit using context + blank language", async () => {

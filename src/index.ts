@@ -16,6 +16,10 @@ export interface Env {
   DISCORD_PUBLIC_KEY: string;
   DISCORD_APP_ID: string;
   LLM_API_KEY: string;
+  // Holds the original message behind a reply button, keyed by a random id, so
+  // the result message stays translation-only (no quoted original eating the
+  // 2000-char budget).
+  REPLY_CTX: KVNamespace;
   // Optional provider config (defaults: OpenRouter + claude-haiku-4.5).
   LLM_BASE_URL?: string;
   LLM_MODEL?: string;
@@ -36,12 +40,16 @@ const C_TEXT_DISPLAY = 10;
 const C_LABEL = 18;
 
 // Custom ids for the reply flow
-const REPLY_BUTTON = "open_reply";
+const REPLY_BUTTON = "open_reply"; // followed by ":<kv-key>"
 const REPLY_MODAL = "replymodal";
+
+// Reply context lives in KV this long — comfortably past the 15-minute
+// interaction-token window, but a reply you haven't sent within an hour is
+// almost certainly abandoned.
+const REPLY_CTX_TTL = 60 * 60; // 1 hour, in seconds
 
 // Discord limits
 const MAX_INPUT = 4000; // cap what we send to the model
-const MAX_DISCORD_CONTENT = 2000; // Discord message content limit
 
 const NO_TEXT = "⚠️ No text to translate.";
 const FAILED = "⚠️ Translation failed, try again.";
@@ -49,6 +57,12 @@ const FAILED = "⚠️ Translation failed, try again.";
 interface MessageBody {
   content: string;
   components?: unknown[];
+}
+
+/** What we stash in KV behind a reply button. */
+interface ReplyCtx {
+  original: string;
+  translation: string;
 }
 
 export default {
@@ -97,15 +111,19 @@ export default {
       }
     }
 
-    // Reply button on a translation result → open the reply modal.
+    // Reply button on a translation result → open the reply modal. The original
+    // message lives in KV under the key embedded in the button's custom_id.
+    const customId: string = interaction.data?.custom_id ?? "";
     if (
       interaction.type === InteractionType.MESSAGE_COMPONENT &&
-      interaction.data?.custom_id === REPLY_BUTTON
+      customId.startsWith(`${REPLY_BUTTON}:`)
     ) {
-      const { original, translation } = parseReplyMessage(
-        interaction.message?.content ?? "",
+      const key = customId.slice(REPLY_BUTTON.length + 1);
+      const stored = await env.REPLY_CTX.get<ReplyCtx>(key, { type: "json" });
+      // Key missing/expired → still let the user reply, just without context.
+      return jsonResponse(
+        buildReplyModal(stored?.original ?? "", stored?.translation ?? ""),
       );
-      return jsonResponse(buildReplyModal(original, translation));
     }
 
     // Reply modal submitted → translate the reply with context.
@@ -148,11 +166,17 @@ function deferTranslate(
       return { content: FAILED };
     }
     if (withReplyButton) {
-      const original = text.replace(/\s+/g, " ").trim().slice(0, 1500);
-      return {
-        content: `> -# ${original}\n${translated}`,
-        components: [replyButtonRow()],
-      };
+      // Stash the original in KV and reference it from the button, so the result
+      // message is just the translation — the original no longer eats into the
+      // 2000-char budget (and isn't capped to fit one message anymore).
+      const key = crypto.randomUUID();
+      const original = text.replace(/\s+/g, " ").trim();
+      await env.REPLY_CTX.put(
+        key,
+        JSON.stringify({ original, translation: translated } satisfies ReplyCtx),
+        { expirationTtl: REPLY_CTX_TTL },
+      );
+      return { content: translated, components: [replyButtonRow(key)] };
     }
     return { content: translated };
   };
@@ -189,11 +213,16 @@ function deferReply(
   return deferredEphemeral();
 }
 
-function replyButtonRow() {
+function replyButtonRow(key: string) {
   return {
     type: C_ACTION_ROW,
     components: [
-      { type: C_BUTTON, style: 2, label: "✍️ Translate a reply", custom_id: REPLY_BUTTON },
+      {
+        type: C_BUTTON,
+        style: 2,
+        label: "✍️ Translate a reply",
+        custom_id: `${REPLY_BUTTON}:${key}`,
+      },
     ],
   };
 }
@@ -253,19 +282,6 @@ function buildReplyModal(original: string, translation: string) {
   };
 }
 
-/** Parse the original (subtext line) and translation (bold line) out of a result. */
-function parseReplyMessage(content: string): { original: string; translation: string } {
-  const lines = content.split("\n");
-  const original = lines[0]?.match(/^>?\s*-#\s+(.*)$/)?.[1].trim() ?? "";
-  const translation = lines
-    .slice(1)
-    .join("\n")
-    .replace(/^\*\*/, "")
-    .replace(/\*\*$/, "")
-    .trim();
-  return { original, translation };
-}
-
 /** Read submitted text-input values from a MODAL_SUBMIT payload (Label or Action Row). */
 function extractModalValues(
   components: {
@@ -286,27 +302,61 @@ function extractModalValues(
   return out;
 }
 
-/** Edit the deferred interaction response. The interaction token is the auth. */
+/**
+ * Edit the deferred placeholder with the result. The translation is sent inline;
+ * if Discord rejects it for exceeding the per-message content limit, it is resent
+ * as a `.txt` attachment instead (rather than guessing the limit up front, we let
+ * Discord decide — this stays correct whatever the actual cap is). The interaction
+ * token is the auth.
+ */
 async function editOriginalResponse(
   appId: string,
   token: string,
   body: MessageBody,
 ): Promise<void> {
+  const url = `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/@original`;
+
+  const payload: Record<string, unknown> = { content: body.content };
+  if (body.components) payload.components = body.components;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (res.ok) return;
+
+  const errText = await res.text();
+  if (isContentTooLong(res.status, errText)) {
+    await editWithFile(url, body);
+    return;
+  }
+  console.error("editOriginalResponse failed", res.status, errText);
+}
+
+/** Discord rejects over-length content with error code 50035 (Invalid Form Body). */
+function isContentTooLong(status: number, errText: string): boolean {
+  return status === 400 && errText.includes("50035");
+}
+
+/** Resend the result as a text-file attachment (multipart), keeping any components. */
+async function editWithFile(url: string, body: MessageBody): Promise<void> {
   const payload: Record<string, unknown> = {
-    content: body.content.slice(0, MAX_DISCORD_CONTENT),
+    attachments: [{ id: 0, filename: "translation.txt" }],
   };
   if (body.components) payload.components = body.components;
 
-  const res = await fetch(
-    `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/@original`,
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    },
+  const form = new FormData();
+  form.append("payload_json", JSON.stringify(payload));
+  form.append(
+    "files[0]",
+    new Blob([body.content], { type: "text/plain" }),
+    "translation.txt",
   );
+
+  // No explicit Content-Type — the runtime sets multipart/form-data + boundary.
+  const res = await fetch(url, { method: "PATCH", body: form });
   if (!res.ok) {
-    console.error("editOriginalResponse failed", res.status, await res.text());
+    console.error("editWithFile failed", res.status, await res.text());
   }
 }
 
